@@ -14,7 +14,7 @@ struct HashSet{
     struct node_t ** table;
     int capacity;
     int setSize;
-    int * locks;
+    int * atomic_locks;
     int locks_length;
     unsigned long long owner;
 };
@@ -83,14 +83,17 @@ void acquire(struct HashSet *H,int hash_code){
             who=get_pointer(cpy_owner);
             mark=get_count(cpy_owner);
         }
-        int * old_locks=H->locks;
-        int old_locks_length=H->locks_length;
+        //int old_locks_length=H->locks_length;
+        //int * old_locks=H->locks;
+        int *cpy_locks=H->atomic_locks;
+        int *old_locks=get_pointer(cpy_locks);
+        int old_locks_length =get_count(cpy_locks);
         lock_set(old_locks,hash_code % old_locks_length);
         cpy_owner=H->owner;
         who=get_pointer(cpy_owner);
         mark=get_count(cpy_owner);
         
-        if(((!mark) || (who==me))&&(H->locks==old_locks)){
+        if(((!mark) || (who==me))&&(H->atomic_locks==cpy_locks)){
             return;
         }
         else{
@@ -108,7 +111,7 @@ void unlock_set(int * locks, int hash_code){
 
 void release(struct HashSet * H,int hash_code){
 
-    unlock_set(H->locks,hash_code % (H->locks_length));
+    unlock_set((int *)get_pointer(H->atomic_locks),hash_code % ((int)get_count(H->atomic_locks)));
 }
 
 
@@ -194,9 +197,10 @@ void initialize(struct HashSet * H, int capacity){
     for(i=0;i<capacity;i++){
         H->table[i]=NULL;
     }
-    H->locks_length=capacity;
-    H->locks=(int *)malloc(sizeof(int) * capacity);
-    for(i=0;i<capacity;i++) H->locks[i]=0;
+    int new_locks_length=capacity;
+    int * new_locks=(int *)malloc(sizeof(int) * capacity);
+    for(i=0;i<capacity;i++) new_locks[i]=0;
+    H->atomic_locks = set_both(H->atomic_locks,new_locks,new_locks_length);
     H->owner = set_both(H->owner,NULL_VALUE,0);
 
 }
@@ -226,7 +230,7 @@ void add(struct HashSet *H,int hash_code, int val, int reentrant){
     //H->setSize++;
     __sync_fetch_and_add(&(H->setSize),1);
     if(!reentrant) release(H,hash_code);
-    if (policy(H)) resize(H);
+    if(!reentrant) {if (policy(H)) resize(H);}
 }
 
 int delete(struct HashSet *H,int hash_code, int val){
@@ -242,8 +246,9 @@ int delete(struct HashSet *H,int hash_code, int val){
 
 void quiesce(struct HashSet *H){
     int i;
+    int *locks=get_pointer(H->atomic_locks);
     for(i=0;i<H->capacity;i++){
-        while(H->locks[i]==1); //TODO: is it a race?
+        while(locks[i]==1); //TODO: is it a race?
     }
 }
 
@@ -261,13 +266,16 @@ void resize(struct HashSet *H){
         
     //for(i=0;i<H->locks_length;i++) lock_set(H,i);
         if(old_capacity!=H->capacity) {
-            for(i=0;i<H->locks_length;i++) //unlock_set(H,i);
+            //for(i=0;i<H->locks_length;i++) //unlock_set(H,i);
+                H->owner=set_both(H->owner,NULL_VALUE,0);
                 return; //somebody beat us to it
         }
         quiesce(H);  
         H->capacity =  new_capacity;
-        H->locks_length = new_capacity; //in this implementetion 
+        //H->locks_length = new_capacity; //in this implementetion 
                                         //locks_length == capacity
+                                        //edit!!
+        int new_locks_length=new_capacity;
         struct node_t ** old_table = H->table;
         H->setSize=0;
         H->table = (struct node_t **)malloc(sizeof(struct node_t *)*new_capacity);
@@ -286,18 +294,20 @@ void resize(struct HashSet *H){
                 curr=curr->next;
             }
         }
-        free(old_table);
+        //free(old_table);
         //all locks should be free now (quiesce ensures that)
         //so we might as well delete the old ones and make new ones
-        int * old_locks = H->locks;
-        H->locks = (int *)malloc(sizeof(int) * new_capacity);
-        for(i=0;i<H->locks_length;i++) H->locks[i]=0;
-        free(old_locks);
+        int * old_locks = get_pointer(H->atomic_locks);
+        //for(i=0;i<old_capacity;i++) if( H->locks[i]!=0) printf("HEY!\n");
+        int * new_locks = (int *)malloc(sizeof(int) * new_capacity);//edit!
+        for(i=0;i<new_locks_length;i++) new_locks[i]=0;//edit
+        H->atomic_locks=(int *)set_both(H->atomic_locks,new_locks,new_locks_length);
         expected_value = new_owner;
         new_owner = set_both(new_owner,NULL_VALUE,0);
         if(!__sync_bool_compare_and_swap(&(H->owner),expected_value,new_owner))
             printf("This should not have happened\n");
 
+        //free(old_locks);
     }
 
     
@@ -324,10 +334,10 @@ void main(int argc,char * argv[]){
     initialize(H,10);
     srand(time(NULL));
     int i,j;
-    #pragma omp parallel for num_threads(5) shared(H) private(i,j)
-    for(j=0;j<5;j++){
-        for(i=0;i<10;i++){
-            add(H,i+j*10,i+j*10,0);
+    #pragma omp parallel for num_threads(8) shared(H) private(i,j)
+    for(j=0;j<8;j++){
+        for(i=0;i<700;i++){
+            add(H,i+j*700,i+j*700,0);
             //add(H,rand(),i,0);
         }
     }
@@ -339,6 +349,7 @@ void main(int argc,char * argv[]){
     */
     print_set(H);
     printf("%d \n",H->setSize);
+    printf("%d \n",H->capacity);
     return;
 
     
