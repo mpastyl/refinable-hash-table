@@ -14,46 +14,46 @@ struct HashSet{
     struct node_t ** table;
     int capacity;
     int setSize;
-    int * atomic_locks;
+    __int128 atomic_locks;
     int locks_length;
-    unsigned long long owner;
+    __int128 owner;
 };
 
 int NULL_VALUE = 5139239;
-unsigned long long get_count(unsigned long long a){
 
-    unsigned long long b = a >>48;
+__int128 get_count(__int128 a){
+
+    __int128 b = a >>64;
     return b;
 }
 
-unsigned long long get_pointer(unsigned long long a){
-    unsigned long long b = a << 16;
-    b= b >>16;
+__int128 get_pointer(__int128 a){
+    __int128 b = a << 64;
+    b= b >>64;
     return b;
 }
 
-unsigned long long set_count(unsigned long long  a, unsigned long long count){
-    unsigned long long count_temp =  count << 48;
-    unsigned long long b = get_pointer(a);
+__int128 set_count(__int128  a, __int128 count){
+    __int128 count_temp =  count << 64;
+    __int128 b = get_pointer(a);
     b = b | count_temp;
     return b;
 }
 
-unsigned long long set_pointer(unsigned long long a, unsigned long long ptr){
-    unsigned long long b = 0;
-    unsigned long long c = get_count(a);
+__int128 set_pointer(__int128 a, __int128 ptr){
+    __int128 b = 0;
+    __int128 c = get_count(a);
     b = set_count(b,c);
     ptr = get_pointer(ptr);
     b= b | ptr;
     return b;
 }
 
-unsigned long long set_both(unsigned long long a, unsigned long long ptr, unsigned long long count){
+__int128 set_both(__int128 a, __int128 ptr, __int128 count){
     a=set_pointer(a,ptr);
     a=set_count(a,count);
     return a;
 }
-
 
 void lock_set (int * locks, int hash_code){
 
@@ -72,22 +72,22 @@ void unlock_set(int *,int);
 
 // operations call acquire to lock
 void acquire(struct HashSet *H,int hash_code){
-    int me = omp_get_thread_num();
-    int who,cpy_owner,mark;
+    __int128 me = (__int128) omp_get_thread_num();
+    __int128 who,cpy_owner,mark;
     while (1){
         cpy_owner=H->owner;
         who=get_pointer(cpy_owner);
         mark=get_count(cpy_owner);
-        while((mark==1)&&(who!=me)){
+        while((mark==(__int128)1)&&(who!=me)){
             cpy_owner=H->owner;
             who=get_pointer(cpy_owner);
             mark=get_count(cpy_owner);
         }
         //int old_locks_length=H->locks_length;
         //int * old_locks=H->locks;
-        int *cpy_locks=H->atomic_locks;
-        int *old_locks=get_pointer(cpy_locks);
-        int old_locks_length =get_count(cpy_locks);
+        __int128 cpy_locks=H->atomic_locks;
+        __int128 old_locks=get_pointer(cpy_locks);
+        int  old_locks_length =(int)get_count(cpy_locks);
         lock_set(old_locks,hash_code % old_locks_length);
         cpy_owner=H->owner;
         who=get_pointer(cpy_owner);
@@ -200,8 +200,9 @@ void initialize(struct HashSet * H, int capacity){
     int new_locks_length=capacity;
     int * new_locks=(int *)malloc(sizeof(int) * capacity);
     for(i=0;i<capacity;i++) new_locks[i]=0;
-    H->atomic_locks = set_both(H->atomic_locks,new_locks,new_locks_length);
-    H->owner = set_both(H->owner,NULL_VALUE,0);
+    H->atomic_locks = set_both(H->atomic_locks,(__int128)new_locks,(__int128)new_locks_length);
+    printf("length count %lld \n",get_count(H->atomic_locks));
+    H->owner = set_both(H->owner,(__int128)NULL_VALUE,0);
 
 }
 
@@ -246,7 +247,7 @@ int delete(struct HashSet *H,int hash_code, int val){
 
 void quiesce(struct HashSet *H){
     int i;
-    int *locks=get_pointer(H->atomic_locks);
+    int *locks=(int *)get_pointer(H->atomic_locks);
     for(i=0;i<H->capacity;i++){
         while(locks[i]==1); //TODO: is it a race?
     }
@@ -254,20 +255,21 @@ void quiesce(struct HashSet *H){
 
 void resize(struct HashSet *H){
     
-    int i,mark,me;
+    int i;
+    __int128 mark,me;
     struct node_t * curr;
     int old_capacity = H->capacity;
     int new_capacity =  old_capacity * 2;
 
-    me = omp_get_thread_num();
-    int expected_value = set_both(expected_value,NULL_VALUE,0);
-    int new_owner=set_both(new_owner,me,1);
+    me = (__int128)omp_get_thread_num();
+    __int128 expected_value = set_both(expected_value,(__int128)NULL_VALUE,0);
+    __int128 new_owner=set_both(new_owner,me,(__int128)1);
     if(__sync_bool_compare_and_swap(&(H->owner),expected_value,new_owner)){
         
     //for(i=0;i<H->locks_length;i++) lock_set(H,i);
         if(old_capacity!=H->capacity) {
             //for(i=0;i<H->locks_length;i++) //unlock_set(H,i);
-                H->owner=set_both(H->owner,NULL_VALUE,0);
+                H->owner=set_both(H->owner,(__int128)NULL_VALUE,0);
                 return; //somebody beat us to it
         }
         quiesce(H);  
@@ -297,13 +299,14 @@ void resize(struct HashSet *H){
         //free(old_table);
         //all locks should be free now (quiesce ensures that)
         //so we might as well delete the old ones and make new ones
-        int * old_locks = get_pointer(H->atomic_locks);
+        int * old_locks = (int *)get_pointer(H->atomic_locks);
         //for(i=0;i<old_capacity;i++) if( H->locks[i]!=0) printf("HEY!\n");
         int * new_locks = (int *)malloc(sizeof(int) * new_capacity);//edit!
         for(i=0;i<new_locks_length;i++) new_locks[i]=0;//edit
-        H->atomic_locks=(int *)set_both(H->atomic_locks,new_locks,new_locks_length);
+        __int128 temp_atomic_locks=set_both(temp_atomic_locks,(__int128)new_locks,(__int128)new_locks_length);
+        H->atomic_locks=temp_atomic_locks;
         expected_value = new_owner;
-        new_owner = set_both(new_owner,NULL_VALUE,0);
+        new_owner = set_both(new_owner,(__int128)NULL_VALUE,0);
         if(!__sync_bool_compare_and_swap(&(H->owner),expected_value,new_owner))
             printf("This should not have happened\n");
 
