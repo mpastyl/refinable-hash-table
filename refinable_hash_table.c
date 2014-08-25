@@ -215,11 +215,15 @@ void resize(struct HashSet *);
 
 int contains(struct HashSet *H,int hash_code, int val){
     
-    acquire(H,hash_code);
-    int bucket_index = hash_code % H->capacity;
-    int res=list_search(H->table[bucket_index],val);
-    release(H,hash_code);
-    return res;
+    
+
+        int bucket_index = hash_code % H->capacity;
+        int res=list_search(H->table[bucket_index],val);
+        acquire(H,hash_code);
+        bucket_index = hash_code % H->capacity;
+        res=list_search(H->table[bucket_index],val);
+        release(H,hash_code);
+        return res;
 }
 
 //reentrant ==1 means we must not lock( we are calling from resize so we have already locked the data structure)
@@ -273,7 +277,6 @@ void resize(struct HashSet *H){
                 return; //somebody beat us to it
         }
         quiesce(H);  
-        H->capacity =  new_capacity;
         //H->locks_length = new_capacity; //in this implementetion 
                                         //locks_length == capacity
                                         //edit!!
@@ -305,6 +308,7 @@ void resize(struct HashSet *H){
         for(i=0;i<new_locks_length;i++) new_locks[i]=0;//edit
         __int128 temp_atomic_locks=set_both(temp_atomic_locks,(__int128)new_locks,(__int128)new_locks_length);
         H->atomic_locks=temp_atomic_locks;
+        H->capacity =  new_capacity;
         expected_value = new_owner;
         new_owner = set_both(new_owner,(__int128)NULL_VALUE,0);
         if(!__sync_bool_compare_and_swap(&(H->owner),expected_value,new_owner))
@@ -356,7 +360,7 @@ void main(int argc,char * argv[]){
     int inp_2=atoi(argv[3]);
     int inp_3=atoi(argv[4]);
     struct HashSet * H=(struct HashSet *) malloc(sizeof(struct HashSet));
-    initialize(H,10);
+    initialize(H,16);
     srand(time(NULL));
     int c,k,i,j;
     int op_count=1000000;
