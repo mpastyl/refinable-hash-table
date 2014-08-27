@@ -8,6 +8,7 @@ struct node_t{
     struct node_t * next;
 };
 
+int MAX_LOCKS=64;
 
 struct HashSet{
     //int length;
@@ -252,7 +253,8 @@ int delete(struct HashSet *H,int hash_code, int val){
 void quiesce(struct HashSet *H){
     int i;
     int *locks=(int *)get_pointer(H->atomic_locks);
-    for(i=0;i<H->capacity;i++){
+    int locks_length=(int*) get_count(H->atomic_locks);
+    for(i=0;i<locks_length;i++){
         while(locks[i]==1); //TODO: is it a race?
     }
 }
@@ -280,7 +282,9 @@ void resize(struct HashSet *H){
         //H->locks_length = new_capacity; //in this implementetion 
                                         //locks_length == capacity
                                         //edit!!
-        int new_locks_length=new_capacity;
+        int new_locks_length;
+        if(new_capacity<=64) new_locks_length=new_capacity;
+        else new_locks_length=64;
         struct node_t ** old_table = H->table;
         H->setSize=0;
         H->table = (struct node_t **)malloc(sizeof(struct node_t *)*new_capacity);
@@ -304,7 +308,7 @@ void resize(struct HashSet *H){
         //so we might as well delete the old ones and make new ones
         int * old_locks = (int *)get_pointer(H->atomic_locks);
         //for(i=0;i<old_capacity;i++) if( H->locks[i]!=0) printf("HEY!\n");
-        int * new_locks = (int *)malloc(sizeof(int) * new_capacity);//edit!
+        int * new_locks = (int *)malloc(sizeof(int) * new_locks_length);//edit!
         for(i=0;i<new_locks_length;i++) new_locks[i]=0;//edit
         __int128 temp_atomic_locks=set_both(temp_atomic_locks,(__int128)new_locks,(__int128)new_locks_length);
         H->atomic_locks=temp_atomic_locks;
